@@ -76,11 +76,14 @@ class OllamaClient(LLMClient):
 
     provider = "ollama"
 
-    def __init__(self, model: str, max_tokens: int = 4000, host: str | None = None) -> None:
+    def __init__(
+        self, model: str, max_tokens: int = 4000, host: str | None = None, max_attempts: int = 3
+    ) -> None:
         import ollama
 
         self.model = model
         self.max_tokens = max_tokens
+        self.max_attempts = max_attempts
         self._client = ollama.Client(host=host)
 
     def complete_json(
@@ -89,15 +92,19 @@ class OllamaClient(LLMClient):
         messages = [{"role": "user", "content": prompt}]
         if system:
             messages.insert(0, {"role": "system", "content": system})
-        response = self._client.chat(
-            model=self.model,
-            messages=messages,
-            format=schema.model_json_schema(),
-            # La graine varie avec `sample` : plusieurs tirages restent reproductibles.
-            options={"num_predict": self.max_tokens, "seed": sample},
-        )
-        self.last_usage = Usage(response.prompt_eval_count or 0, response.eval_count or 0)
-        try:
-            return schema.model_validate(json.loads(response.message.content or ""))
-        except ValueError as err:
-            raise LLMError(f"JSON invalide renvoyé par Ollama : {err}") from err
+        # Les petits modèles locaux renvoient parfois un JSON tronqué ou mal formé : on
+        # retente avec une autre graine (reproductible, dérivée de `sample`).
+        error: Exception | None = None
+        for attempt in range(self.max_attempts):
+            response = self._client.chat(
+                model=self.model,
+                messages=messages,
+                format=schema.model_json_schema(),
+                options={"num_predict": self.max_tokens, "seed": sample * 1000 + attempt},
+            )
+            self.last_usage = Usage(response.prompt_eval_count or 0, response.eval_count or 0)
+            try:
+                return schema.model_validate(json.loads(response.message.content or ""))
+            except ValueError as err:
+                error = err
+        raise LLMError(f"JSON invalide renvoyé par Ollama ({self.max_attempts} essais) : {error}")

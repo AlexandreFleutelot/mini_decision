@@ -45,7 +45,7 @@ llm:
   generator: {provider: anthropic, model: claude-haiku-5-5, max_tokens: 16000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}
   judges:                       # deux juges différents ; la moyenne donne le label souple
     - {provider: anthropic, model: claude-haiku-5-5, max_tokens: 4000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}
-    - {provider: ollama, model: "gemma4:e4b", max_tokens: 1000, host: "http://localhost:11434"}  # tag exact : `ollama list`
+    - {provider: ollama, model: "gemma4:e4b", max_tokens: 2000, host: "http://localhost:11434"}  # tag exact : `ollama list`
   budget_usd: 10.0              # cumulé sur tous les runs ; au-delà, les appels payants sont refusés
   max_concurrency: 8
 

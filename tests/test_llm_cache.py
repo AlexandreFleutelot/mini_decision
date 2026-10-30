@@ -82,3 +82,33 @@ def test_free_provider_ignores_budget(tmp_path: Path) -> None:
     client = CachedLLMClient(fake, tmp_path / "cache", tracker)  # prix 0 : modèle local
     client.complete_json("a", Judgment)
     assert tracker.spent_usd == 0.0
+
+
+def test_ollama_retries_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from mini_decision.llm import LLMError
+    from mini_decision.llm.providers import OllamaClient
+
+    def reply(content: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            message=SimpleNamespace(content=content), prompt_eval_count=10, eval_count=5
+        )
+
+    outputs = [reply('{"off_topic": false, "p_true": 0.9, "rationale": "tronqu'), reply(
+        '{"off_topic": false, "p_true": 0.9, "rationale": "ok"}'
+    )]
+    client = OllamaClient("gemma4:e4b")
+    seeds: list[int] = []
+
+    def fake_chat(**kwargs):  # noqa: ANN003, ANN202
+        seeds.append(kwargs["options"]["seed"])
+        return outputs.pop(0)
+
+    monkeypatch.setattr(client._client, "chat", fake_chat)
+    assert client.complete_json("p", Judgment, sample=2).rationale == "ok"
+    assert seeds == [2000, 2001]  # graine différente à chaque essai
+
+    monkeypatch.setattr(client._client, "chat", lambda **kw: reply("pas du json"))
+    with pytest.raises(LLMError):
+        client.complete_json("p", Judgment)

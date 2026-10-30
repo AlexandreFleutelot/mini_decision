@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 
 from mini_decision.config import DataConfig
 from mini_decision.llm import BudgetExceeded, LLMClient, LLMError, spend_summary
 from mini_decision.llm import prompts
 from mini_decision.schemas import GeneratedPair, Kind, RawPair, UnlabeledBatch
-from mini_decision.utils import Progress
+from mini_decision.utils import Progress, interruptible_pool
 
 Log = Callable[[str], None]
 
@@ -106,7 +106,7 @@ def generate_pairs(
     progress = Progress(
         "datagen paires", cfg.n_pairs, log, every_s=0.0, extra=lambda: spend_summary([client])
     )
-    with ThreadPoolExecutor(max_concurrency) as pool:
+    with interruptible_pool(max_concurrency) as pool:
         for start in range(0, cfg.n_pairs, max_concurrency):
             wave = range(start, min(start + max_concurrency, cfg.n_pairs))
             avoids = [
@@ -152,7 +152,7 @@ def generate_unlabeled(
     progress = Progress(
         "datagen non étiqueté", n_calls, log, extra=lambda: spend_summary([client])
     )
-    with ThreadPoolExecutor(max_concurrency) as pool:
+    with interruptible_pool(max_concurrency) as pool:
         futures = {pool.submit(one, i): i for i in range(n_calls)}
         try:
             for future in as_completed(futures):

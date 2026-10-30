@@ -4,14 +4,14 @@ les juges sont d'accord, sinon on rejette l'exemple."""
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 
 from mini_decision.config import DataConfig
 from mini_decision.llm import BudgetExceeded, LLMClient, LLMError, spend_summary
 from mini_decision.llm import prompts
 from mini_decision.schemas import Example, Judgment, Kind, RawPair, Rejected
-from mini_decision.utils import Progress
+from mini_decision.utils import Progress, interruptible_pool
 
 Log = Callable[[str], None]
 
@@ -121,10 +121,14 @@ def judge_all(
 
     def extra() -> str:
         n_kept = sum(isinstance(r, Example) for r in results.values())
-        return f"gardés {n_kept}, rejetés {len(results) - n_kept} · {spend_summary(judges)}"
+        n_rejected = sum(isinstance(r, Rejected) for r in results.values())
+        n_failed = len(results) - n_kept - n_rejected
+        return (
+            f"gardés {n_kept}, rejetés {n_rejected}, échecs {n_failed} · {spend_summary(judges)}"
+        )
 
     progress = Progress("verify", len(cands), log, extra=extra)
-    with ThreadPoolExecutor(max_concurrency) as pool:
+    with interruptible_pool(max_concurrency) as pool:
         futures = {pool.submit(one, c): i for i, c in enumerate(cands)}
         try:
             for future in as_completed(futures):
@@ -137,4 +141,7 @@ def judge_all(
     ordered = [results[i] for i in sorted(results)]  # ordre stable, quel que soit le parallélisme
     kept = [r for r in ordered if isinstance(r, Example)]
     rejected = [r for r in ordered if isinstance(r, Rejected)]
+    n_failed = len(ordered) - len(kept) - len(rejected)
+    if n_failed:
+        log(f"  {n_failed} contextes non jugés (erreur LLM) : ni gardés ni rejetés")
     return kept, rejected, spreads
