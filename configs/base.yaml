@@ -32,9 +32,11 @@ data:
     off_topic: 0.2
   counterfactual_share_of_false: 0.5
   max_context_tokens: 128
+  tokens_per_word_estimate: 1.6
   judge_max_disagreement: 0.3
   off_topic_label: 0.5
   unlabeled_ratio: 3.0          # volume non étiqueté / volume de contextes étiquetés (2 à 5)
+  unlabeled_texts_per_call: 40
   split: {train: 0.8, val: 0.1, test: 0.1}
   leakage_max_accuracy: 0.6     # au-delà : fuite signalée
 

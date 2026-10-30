@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ class SpendTracker:
         self.path = Path(path)
         self.budget_usd = budget_usd
         self.spent_usd = 0.0
+        self._lock = threading.Lock()  # les appels partent en parallèle
         if self.path.exists():
             self.spent_usd = json.loads(self.path.read_text(encoding="utf-8"))["spent_usd"]
 
@@ -33,9 +35,10 @@ class SpendTracker:
             )
 
     def add(self, usd: float) -> None:
-        self.spent_usd += usd
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps({"spent_usd": self.spent_usd}), encoding="utf-8")
+        with self._lock:
+            self.spent_usd += usd
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps({"spent_usd": self.spent_usd}), encoding="utf-8")
 
 
 def cache_key(
