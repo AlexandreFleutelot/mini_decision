@@ -30,7 +30,7 @@ Le calcul choisit automatiquement `cuda`, puis `mps` (Apple Silicon), puis `cpu`
 |------------|----------------------------------|----------------------------------------|
 | Générateur | Anthropic `claude-haiku-5-5`     | `ANTHROPIC_API_KEY`                    |
 | Juge 1     | Anthropic `claude-haiku-5-5`     | `ANTHROPIC_API_KEY`                    |
-| Juge 2     | Ollama local `gemma4`            | `ollama serve` + `ollama pull <tag>`   |
+| Juge 2     | Ollama local `gemma4:e4b`        | app Ollama lancée + `ollama pull gemma4:e4b` |
 
 Un client OpenAI est aussi disponible (`provider: openai`, clé `OPENAI_API_KEY`).
 
