@@ -1,0 +1,100 @@
+# Configuration de base. Les variantes (configs/*.yaml) héritent de ce fichier via `inherit:`
+# et ne redéfinissent que les clés qui changent. Toute valeur peut aussi être surchargée
+# en ligne de commande : --set model.head=dot
+
+seed: 42
+run_name: base
+device: auto            # auto (cuda > mps > cpu) | cpu | cuda | mps
+
+paths:
+  data_dir: data
+  raw_dir: data/raw
+  processed_dir: data/processed
+  adversarial_dir: data/adversarial
+  real_calibration: data/real_calibration.jsonl
+  llm_cache_dir: .cache/llm
+  runs_dir: runs
+
+data:
+  domain: "documents et échanges administratifs d'entreprise"
+  subdomains:                   # les paires sont réparties uniformément entre sous-domaines
+    - facturation et paiements
+    - livraison de colis
+    - support client et tickets
+    - ressources humaines (congés, contrats de travail, paie)
+    - contrats et abonnements
+  language: fr
+  n_pairs: 200                  # cible finale : 5 000 à 10 000
+  contexts_per_pair: 15
+  kind_ratios:                  # répartition des contextes par paire
+    "true": 0.4
+    "false": 0.4                 # dont contrefactuels
+    off_topic: 0.2
+  counterfactual_share_of_false: 0.5
+  max_context_tokens: 128
+  judge_max_disagreement: 0.3
+  off_topic_label: 0.5
+  unlabeled_ratio: 3.0          # volume non étiqueté / volume de contextes étiquetés (2 à 5)
+  split: {train: 0.8, val: 0.1, test: 0.1}
+  leakage_max_accuracy: 0.6     # au-delà : fuite signalée
+
+llm:
+  # Prix en $ par million de tokens (entrée / sortie), utilisés pour le plafond de dépense.
+  generator: {provider: anthropic, model: claude-haiku-5-5, max_tokens: 16000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}
+  judges:                       # deux juges différents ; la moyenne donne le label souple
+    - {provider: anthropic, model: claude-haiku-5-5, max_tokens: 4000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}
+    - {provider: ollama, model: "gemma4:e4b", max_tokens: 1000, host: "http://localhost:11434"}  # tag exact : `ollama list`
+  budget_usd: 10.0              # cumulé sur tous les runs ; au-delà, les appels payants sont refusés
+  max_concurrency: 8
+
+tokenizer:
+  model_type: unigram
+  vocab_size: 4000
+  special_tokens: ["[PAD]", "[CLS]", "[MASK]", "[CTX]", "[DESC]"]
+
+model:
+  encoder: transformer          # ngram | cnn | transformer
+  head: qda                     # qda | dot
+  cov: diag                     # diag | full
+  k: 16
+  s_min: 0.05
+  s_max: 5.0
+  max_len: 128
+  dropout: 0.1
+  transformer: {n_layers: 3, d_model: 128, n_heads: 4, d_ff: 512}
+  cnn: {n_layers: 4, d_model: 128, kernel_size: 3, dilations: [1, 2, 4, 8]}
+  ngram: {n_max: 3, n_buckets: 50000, d_model: 128, hidden: 256}
+
+mlm:
+  mask_prob: 0.15
+  oversample_factor: 3.0
+  oversample_words: [ne, "n'", pas, jamais, aucun, aucune, plus, rien, sauf, sans, ni]
+  oversample_numbers: true
+  lr: 1.0e-3
+  batch_size: 256
+  max_epochs: 50
+  patience: 3
+
+train:
+  lr: 1.0e-3
+  weight_decay: 0.01
+  warmup_frac: 0.05
+  batch_size: 256
+  grad_clip: 1.0
+  max_epochs: 30
+  patience: 3
+  aux_mlm_lambda: 0.0
+  rda_alpha_end_frac: 0.5       # alpha (RDA) passe de 0 à 1 sur cette fraction de l'entraînement
+  init_from_mlm: true
+
+adversarial:
+  n_rounds: 3
+  error_threshold: 0.4
+  n_pairs_per_round: 200
+  errors_per_prompt: [3, 5]
+  new_contexts_per_pair: 5
+  max_share: 0.3
+
+eval:
+  ece_bins: 15
+  decision_threshold: 0.5

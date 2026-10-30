@@ -1,0 +1,4 @@
+inherit: base.yaml
+run_name: cnn_qda
+model:
+  encoder: cnn

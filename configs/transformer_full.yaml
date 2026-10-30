@@ -1,0 +1,4 @@
+inherit: base.yaml
+run_name: transformer_qda_full
+model:
+  cov: full
