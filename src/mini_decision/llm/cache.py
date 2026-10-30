@@ -59,6 +59,15 @@ def cache_key(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def spend_summary(clients: list[LLMClient]) -> str:
+    """« 0.32 $ » si l'un des clients suit une dépense, sinon chaîne vide."""
+    for client in clients:
+        tracker = getattr(client, "tracker", None)
+        if tracker is not None:
+            return f"{tracker.spent_usd:.2f} $ / {tracker.budget_usd:.0f} $"
+    return ""
+
+
 class CachedLLMClient(LLMClient):
     """Enveloppe n'importe quel `LLMClient` avec un cache disque."""
 

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from mini_decision.config import DataConfig
-from mini_decision.llm import BudgetExceeded, LLMClient, LLMError
+from mini_decision.llm import BudgetExceeded, LLMClient, LLMError, spend_summary
 from mini_decision.llm import prompts
 from mini_decision.schemas import GeneratedPair, Kind, RawPair, UnlabeledBatch
+from mini_decision.utils import Progress
 
 Log = Callable[[str], None]
 
@@ -102,6 +103,9 @@ def generate_pairs(
             contexts=pair.contexts,
         )
 
+    progress = Progress(
+        "datagen paires", cfg.n_pairs, log, every_s=0.0, extra=lambda: spend_summary([client])
+    )
     with ThreadPoolExecutor(max_concurrency) as pool:
         for start in range(0, cfg.n_pairs, max_concurrency):
             wave = range(start, min(start + max_concurrency, cfg.n_pairs))
@@ -117,7 +121,7 @@ def generate_pairs(
                 if raw is not None:
                     done.append(raw)
                     by_subdomain[raw.subdomain].append(raw.desc_true)
-            log(f"  {len(done)}/{cfg.n_pairs} paires")
+            progress.update(len(wave))
     return done
 
 
@@ -144,12 +148,19 @@ def generate_unlabeled(
             log(f"  lot non étiqueté {i} ignoré : {err}")
             return []
 
-    texts: list[str] = []
-    try:
-        with ThreadPoolExecutor(max_concurrency) as pool:
-            for batch in pool.map(one, range(n_calls)):
-                texts.extend(t.strip() for t in batch if t.strip())
-    except BudgetExceeded as err:
-        log(f"Arrêt : {err}")
-    log(f"  {len(texts)} textes non étiquetés")
+    batches: dict[int, list[str]] = {}
+    progress = Progress(
+        "datagen non étiqueté", n_calls, log, extra=lambda: spend_summary([client])
+    )
+    with ThreadPoolExecutor(max_concurrency) as pool:
+        futures = {pool.submit(one, i): i for i in range(n_calls)}
+        try:
+            for future in as_completed(futures):
+                batches[futures[future]] = future.result()
+                progress.update()
+        except BudgetExceeded as err:
+            log(f"Arrêt : {err}")
+            for f in futures:
+                f.cancel()
+    texts = [t.strip() for i in sorted(batches) for t in batches[i] if t.strip()]
     return texts[:n_texts]

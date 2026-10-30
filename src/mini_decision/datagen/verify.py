@@ -4,13 +4,14 @@ les juges sont d'accord, sinon on rejette l'exemple."""
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from mini_decision.config import DataConfig
-from mini_decision.llm import BudgetExceeded, LLMClient, LLMError
+from mini_decision.llm import BudgetExceeded, LLMClient, LLMError, spend_summary
 from mini_decision.llm import prompts
 from mini_decision.schemas import Example, Judgment, Kind, RawPair, Rejected
+from mini_decision.utils import Progress
 
 Log = Callable[[str], None]
 
@@ -116,17 +117,24 @@ def judge_all(
             kind=c.kind,
         )
 
-    kept: list[Example] = []
-    rejected: list[Rejected] = []
-    try:
-        with ThreadPoolExecutor(max_concurrency) as pool:
-            for i, result in enumerate(pool.map(one, cands), 1):
-                if isinstance(result, Example):
-                    kept.append(result)
-                elif isinstance(result, Rejected):
-                    rejected.append(result)
-                if i % 200 == 0:
-                    log(f"  {i}/{len(cands)} contextes jugés")
-    except BudgetExceeded as err:
-        log(f"Arrêt : {err}")
+    results: dict[int, Example | Rejected | None] = {}
+
+    def extra() -> str:
+        n_kept = sum(isinstance(r, Example) for r in results.values())
+        return f"gardés {n_kept}, rejetés {len(results) - n_kept} · {spend_summary(judges)}"
+
+    progress = Progress("verify", len(cands), log, extra=extra)
+    with ThreadPoolExecutor(max_concurrency) as pool:
+        futures = {pool.submit(one, c): i for i, c in enumerate(cands)}
+        try:
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+                progress.update()
+        except BudgetExceeded as err:
+            log(f"Arrêt : {err}")
+            for f in futures:
+                f.cancel()
+    ordered = [results[i] for i in sorted(results)]  # ordre stable, quel que soit le parallélisme
+    kept = [r for r in ordered if isinstance(r, Example)]
+    rejected = [r for r in ordered if isinstance(r, Rejected)]
     return kept, rejected, spreads
