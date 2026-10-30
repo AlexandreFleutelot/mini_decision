@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/raw/*
+data/processed/*
+data/adversarial/*
+!data/**/.gitkeep
+data/real_calibration.jsonl
+.cache/
+runs/
