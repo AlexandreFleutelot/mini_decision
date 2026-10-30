@@ -1,0 +1,4 @@
+inherit: base.yaml
+run_name: transformer_qda_aux_mlm
+train:
+  aux_mlm_lambda: 0.1

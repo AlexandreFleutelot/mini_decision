@@ -1,0 +1,4 @@
+inherit: base.yaml
+run_name: transformer_qda_no_mlm
+train:
+  init_from_mlm: false

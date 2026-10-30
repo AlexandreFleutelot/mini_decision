@@ -1,0 +1,9 @@
+# Petit run de debug : quelques paires, un modèle rapide.
+inherit: ngram.yaml
+run_name: debug
+data:
+  n_pairs: 10
+train:
+  max_epochs: 2
+mlm:
+  max_epochs: 1
