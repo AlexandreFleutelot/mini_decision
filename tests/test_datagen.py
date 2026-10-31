@@ -122,7 +122,7 @@ def _judge(strict: bool):
 
 
 def test_pipeline_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    answers = {"gen": _generator, "j1": _judge(True), "j2": _judge(False)}
+    answers = {"gen": _generator, "gen2": _generator, "j1": _judge(True), "j2": _judge(False)}
 
     def fake_make_client(cfg, cache_dir, tracker=None):  # noqa: ANN001, ANN202
         return CachedLLMClient(ScriptedLLMClient(cfg.model, answers[cfg.model]), cache_dir, tracker)
@@ -157,3 +157,21 @@ def test_pipeline_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     # Relancer datagen ne refait aucun appel : tout vient du cache.
     result = runner.invoke(app, ["datagen", *args])
     assert "0 nouveaux appels" in result.output
+
+
+    # Un second générateur ajoute un bloc à la suite ; le bloc principal reste en cache.
+    args2 = [*args, "--set", "llm.extra_generators=[{provider: openrouter, model: gen2, n_pairs: 4}]"]
+    result = runner.invoke(app, ["datagen", "--skip-unlabeled", *args2])
+    assert result.exit_code == 0, result.output
+    assert "4 nouveaux appels" in result.output
+    pairs = read_jsonl(tmp_path / "raw" / "pairs.jsonl", RawPair)
+    assert [p.pair_id for p in pairs][-4:] == ["p_00010", "p_00011", "p_00012", "p_00013"]
+    assert {p.generator for p in pairs} == {"gen", "gen2"}
+
+    # probe : une paire générée puis un jugement, par modèle.
+    answers["probe"] = lambda prompt, schema, sample: (
+        _generator(prompt, schema, 0) if schema is GeneratedPair else {"off_topic": False, "p_true": 0.9}
+    )
+    result = runner.invoke(app, ["probe", "-m", "openrouter:probe", *args])
+    assert result.exit_code == 0, result.output
+    assert "15 contextes" in result.output and "p_vrai 0.90" in result.output

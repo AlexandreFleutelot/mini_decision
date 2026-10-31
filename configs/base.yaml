@@ -25,7 +25,7 @@ data:
     - ressources humaines (congés, contrats de travail, paie)
     - contrats et abonnements
   language: fr
-  n_pairs: 200                  # cible finale : 5 000 à 10 000
+  n_pairs: 2100                 # ≈ 30k exemples gardés (choix d'Alex, jalon 4)
   contexts_per_pair: 15
   kind_ratios:                  # répartition des contextes par paire
     "true": 0.4
@@ -36,7 +36,7 @@ data:
   tokens_per_word_estimate: 1.6
   judge_max_disagreement: 0.3
   off_topic_label: 0.5
-  unlabeled_ratio: 3.0          # volume non étiqueté / volume de contextes étiquetés (2 à 5)
+  unlabeled_ratio: 2.0          # volume non étiqueté / volume de contextes étiquetés (2 à 5)
   unlabeled_texts_per_call: 40
   split: {train: 0.8, val: 0.1, test: 0.1}
   leakage_max_accuracy: 0.6     # au-delà : fuite signalée
@@ -47,8 +47,8 @@ llm:
   judges:                       # deux tirages Haiku (variante Gemma local : judges_gemma.yaml)
     - {provider: anthropic, model: claude-haiku-5-5, max_tokens: 4000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}
     - {provider: anthropic, model: claude-haiku-5-5, max_tokens: 4000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}  # second tirage
-  budget_usd: 10.0              # cumulé sur tous les runs ; au-delà, les appels payants sont refusés
-  max_concurrency: 8
+  budget_usd: 15.0              # cumulé sur tous les runs ; au-delà, les appels payants sont refusés
+  max_concurrency: 16
 
 tokenizer:
   model_type: unigram
@@ -77,9 +77,13 @@ mlm:
   mask_token_prob: 0.8
   random_token_prob: 0.1
   lr: 1.0e-3
+  weight_decay: 0.01
+  warmup_frac: 0.05
+  grad_clip: 1.0
   batch_size: 256
   max_epochs: 50
   patience: 3
+  run_name: mlm
 
 train:
   lr: 1.0e-3
@@ -92,6 +96,9 @@ train:
   aux_mlm_lambda: 0.0
   rda_alpha_end_frac: 0.5       # alpha (RDA) passe de 0 à 1 sur cette fraction de l'entraînement
   init_from_mlm: true
+  swap_prob: 0.5
+  max_train_examples: null
+  scaling_sizes: [3000, 10000, 30000]
 
 adversarial:
   n_rounds: 3

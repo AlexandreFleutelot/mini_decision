@@ -16,8 +16,10 @@ COMMANDS = [
     "adversarial-round",
     "report",
     "params",
+    "scaling",
+    "probe",
 ]
-NOT_YET_IMPLEMENTED = COMMANDS[4:-1]
+NOT_YET_IMPLEMENTED = ["calibrate", "evaluate", "adversarial-round", "report"]
 
 
 @pytest.mark.parametrize("command", NOT_YET_IMPLEMENTED)

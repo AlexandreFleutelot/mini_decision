@@ -36,6 +36,16 @@ def _spent(tracker: SpendTracker) -> None:
     typer.echo(f"[budget] {tracker.spent_usd:.4f} $ dépensés sur {tracker.budget_usd:.2f} $")
 
 
+def _tokenizer(cfg: Config):  # noqa: ANN202
+    from mini_decision.tokenizer import Tokenizer
+
+    path = cfg.paths.tokenizer_prefix.with_suffix(".model")
+    if not path.exists():
+        typer.secho(f"{path} absent : lancer train-tokenizer d'abord", fg="red")
+        raise typer.Exit(1)
+    return Tokenizer(path)
+
+
 def _todo(step: str, milestone: int) -> None:
     typer.echo(f"[{step}] pas encore implémenté (jalon {milestone}).")
 
@@ -56,17 +66,25 @@ def datagen(
     cfg = _setup(config, set_)
     tracker = _tracker(cfg)
     client = make_client(cfg.llm.generator, cfg.paths.llm_cache_dir, tracker)
-    typer.echo(f"[datagen] {cfg.data.n_pairs} paires, contextes par paire : {plan_kinds(cfg.data)}")
-    pairs = generate_pairs(cfg.data, client, cfg.llm.max_concurrency, typer.echo)
+    extra = [
+        (make_client(g, cfg.paths.llm_cache_dir, tracker), g.n_pairs or 0) for g in cfg.llm.extra_generators
+    ]
+    blocks = ", ".join(f"{c.model} {n}" for c, n in [(client, cfg.data.n_pairs), *extra])
+    typer.echo(f"[datagen] paires : {blocks} · contextes par paire : {plan_kinds(cfg.data)}")
+    pairs = generate_pairs(cfg.data, client, cfg.llm.max_concurrency, typer.echo, extra=extra)
     n = write_jsonl(cfg.paths.raw_dir / "pairs.jsonl", pairs)
     n_contexts = sum(len(p.contexts) for p in pairs)
     typer.echo(f"[datagen] {n} paires, {n_contexts} contextes -> {cfg.paths.raw_dir}/pairs.jsonl")
     if not skip_unlabeled:
-        n_texts = round(cfg.data.unlabeled_ratio * n_contexts)
+        # Le non étiqueté suit le bloc principal seulement : ajouter des générateurs ne le
+        # régénère pas (61k textes suffisent largement pour le MLM).
+        main = sum(len(p.contexts) for p in pairs if int(p.pair_id[2:]) < cfg.data.n_pairs)
+        n_texts = round(cfg.data.unlabeled_ratio * main)
         texts = generate_unlabeled(cfg.data, client, n_texts, cfg.llm.max_concurrency, typer.echo)
         write_jsonl(cfg.paths.raw_dir / "unlabeled.jsonl", (UnlabeledText(text=t) for t in texts))
         typer.echo(f"[datagen] {len(texts)} textes -> {cfg.paths.raw_dir}/unlabeled.jsonl")
-    typer.echo(f"[cache] {client.hits} réutilisés, {client.misses} nouveaux appels")
+    gens = [client, *(c for c, _ in extra)]
+    typer.echo(f"[cache] {sum(c.hits for c in gens)} réutilisés, {sum(c.misses for c in gens)} nouveaux appels")
     _spent(tracker)
 
 
@@ -137,6 +155,60 @@ def split(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
     typer.echo(f"[split] rapport -> {out}/stats.md")
 
 
+@app.command()
+def probe(
+    model: Annotated[
+        list[str], typer.Option("--model", "-m", help="fournisseur:modèle, ex. openrouter:z-ai/glm-5.3-flash")
+    ],
+    config: ConfigOpt = DEFAULT_CONFIG,
+    set_: SetOpt = None,
+    max_tokens: Annotated[int, typer.Option(help="max_tokens de la génération.")] = 16000,
+) -> None:
+    """Teste des modèles : une paire générée puis jugée par le modèle lui-même (durée, coût, validité)."""
+    import time
+
+    from mini_decision.config import LLMModelConfig
+    from mini_decision.datagen.generate import _pair_prompt, clean_pair, plan_kinds
+    from mini_decision.llm import LLMError, make_client
+    from mini_decision.llm import prompts
+    from mini_decision.schemas import GeneratedPair, Judgment
+
+    cfg = _setup(config, set_)
+    tracker = _tracker(cfg)
+    plan = plan_kinds(cfg.data)
+    system = prompts.SYSTEM_GENERATOR.format(language=cfg.data.language)
+    for spec in model:
+        provider, _, name = spec.partition(":")
+        client = make_client(
+            LLMModelConfig(provider=provider, model=name, max_tokens=max_tokens), cfg.paths.llm_cache_dir, tracker
+        )
+        before, t0 = tracker.spent_usd, time.monotonic()
+        try:
+            pair = clean_pair(client.complete_json(
+                _pair_prompt(cfg.data, plan, cfg.data.subdomains[0], []), GeneratedPair, system=system, sample=-1
+            ))
+            t_gen = time.monotonic() - t0
+            kinds = {k.value: sum(c.kind is k for c in pair.contexts) for k in {c.kind for c in pair.contexts}}
+            ctx = pair.contexts[0]
+            t1 = time.monotonic()
+            judgment = client.complete_json(
+                prompts.JUDGE.format(context=ctx.text, desc_true=pair.desc_true, desc_false=pair.desc_false),
+                Judgment, system=prompts.SYSTEM_JUDGE, sample=-1,
+            )
+            t_judge = time.monotonic() - t1
+        except LLMError as err:
+            typer.secho(f"[probe] {spec} : ÉCHEC {err}", fg="red")
+            continue
+        mode = getattr(client.inner, "mode", "schema")
+        typer.echo(
+            f"[probe] {spec} · génération {t_gen:.1f} s, {len(pair.contexts)} contextes {kinds} · "
+            f"jugement {t_judge:.1f} s (kind {ctx.kind.value} -> p_vrai {judgment.p_true:.2f}, "
+            f"hors sujet {judgment.off_topic}) · mode {mode} · coût {tracker.spent_usd - before:.4f} $"
+        )
+        typer.echo(f"         VRAI : {pair.desc_true}\n         FAUX : {pair.desc_false}\n         ex. : {ctx.text}")
+    _spent(tracker)
+
+
 @app.command("train-tokenizer")
 def train_tokenizer(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
     """Entraîne le tokenizer SentencePiece sur tout le corpus synthétique."""
@@ -182,15 +254,76 @@ def params(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
 @app.command("pretrain-mlm")
 def pretrain_mlm(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
     """Pré-entraîne l'encodeur en MLM (masquage par mots entiers)."""
-    _setup(config, set_)
-    _todo("pretrain-mlm", 4)
+    from mini_decision.train.data import mlm_texts
+    from mini_decision.train.mlm import pretrain_mlm as run_mlm
+
+    cfg = _setup(config, set_)
+    tok = _tokenizer(cfg)
+    out = cfg.paths.processed_dir
+    train = read_jsonl(out / "train.jsonl", Example)
+    val = read_jsonl(out / "val.jsonl", Example)
+    unlabeled_path = cfg.paths.raw_dir / "unlabeled.jsonl"
+    unlabeled = [u.text for u in read_jsonl(unlabeled_path, UnlabeledText)] if unlabeled_path.exists() else []
+    # Le non étiqueté sert à l'entraînement ; la validation MLM = contextes et descriptions de val.
+    run_mlm(cfg, tok, mlm_texts(train, unlabeled), mlm_texts(val, []), get_device(cfg.device), typer.echo)
 
 
 @app.command()
 def train(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
     """Entraînement supervisé (BCE sur labels souples)."""
-    _setup(config, set_)
-    _todo("train", 4)
+    from mini_decision.train.supervised import run_dir, train_supervised
+
+    cfg = _setup(config, set_)
+    tok = _tokenizer(cfg)
+    out = cfg.paths.processed_dir
+    train_supervised(
+        cfg,
+        tok,
+        read_jsonl(out / "train.jsonl", Example),
+        read_jsonl(out / "val.jsonl", Example),
+        get_device(cfg.device),
+        run_dir(cfg),
+        typer.echo,
+    )
+
+
+@app.command()
+def scaling(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
+    """Courbe d'échelle : un entraînement par taille de train.scaling_sizes (paires emboîtées)."""
+    import csv
+
+    from mini_decision.eval.plots import scaling_plot
+    from mini_decision.train.supervised import run_dir, train_supervised
+
+    cfg = _setup(config, set_)
+    tok = _tokenizer(cfg)
+    out = cfg.paths.processed_dir
+    train = read_jsonl(out / "train.jsonl", Example)
+    val = read_jsonl(out / "val.jsonl", Example)
+    rows = []
+    sizes = sorted({min(size, len(train)) for size in cfg.train.scaling_sizes})
+    if max(cfg.train.scaling_sizes) > len(train):
+        typer.secho(f"[scaling] seulement {len(train)} exemples de train : le dernier point utilise tout", fg="yellow")
+    for size in sizes:
+        sized = cfg.model_copy(update={"train": cfg.train.model_copy(update={"max_train_examples": size})})
+        summary = train_supervised(sized, tok, train, val, get_device(cfg.device), run_dir(cfg, f"-n{size}"), typer.echo)
+        rows.append({"n_train": summary["n_train"], **summary["val"]})
+    if not rows:
+        typer.secho("[scaling] aucune taille réalisable : générer plus de données", fg="red")
+        raise typer.Exit(1)
+    dest = run_dir(cfg, "-scaling")
+    dest.mkdir(parents=True, exist_ok=True)
+    with (dest / "scaling.csv").open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    scaling_plot(rows, dest / "scaling.png", title=cfg.run_name)
+    for r in rows:
+        typer.echo(
+            f"[scaling] n={r['n_train']:>6} · log-loss {r['log_loss']:.4f} · acc {r['accuracy']:.3f} · "
+            f"ECE {r['ece']:.4f} · AUROC hors sujet {r['off_topic_auroc']:.3f}"
+        )
+    typer.echo(f"[scaling] -> {dest}/scaling.csv, scaling.png")
 
 
 @app.command()

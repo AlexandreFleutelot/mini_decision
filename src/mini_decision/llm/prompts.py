@@ -1,4 +1,4 @@
-"""Gabarits de prompts (première version ; affinés au jalon 2)."""
+"""Gabarits de prompts (v2 au jalon 4 : longueurs équilibrées, hors-sujet proches)."""
 
 from __future__ import annotations
 
@@ -19,14 +19,19 @@ Puis écris {n_contexts} contextes courts (une à trois phrases, moins de 100 mo
 - {n_false} de kind "false" (le contexte établit desc_false) ;
 - {n_counterfactual} de kind "counterfactual" : édition minimale d'un contexte "true" qui
   inverse la réponse ; indique dans source_index l'index (0-based) du contexte édité ;
-- {n_off_topic} de kind "off_topic" : un texte administratif plausible (même sous-domaine ou
-  un autre) qui ne permet de trancher ni pour l'une ni pour l'autre description.
+- {n_off_topic} de kind "off_topic" : un texte administratif plausible qui ne permet de
+  trancher ni pour l'une ni pour l'autre description. Au moins la moitié sont des hors-sujet
+  PROCHES : mêmes personnes, même dossier ou même document que la proposition, mais ils
+  parlent d'un autre aspect (ex. pour « la facture est payée » : « la facture a été envoyée
+  au service comptable mardi »). Les autres viennent d'un autre sous-domaine.
 
 Exigences :
 - insiste sur la négation, la double négation, la portée de la négation, les quantificateurs
   et les distracteurs plausibles ;
-- varie longueur et style : les contextes vrais ne doivent pas être systématiquement plus
-  longs ni plus formels que les faux ;
+- longueurs équilibrées : chaque contexte "false" a à peu près la même longueur (à quelques
+  mots près) qu'un contexte "true" ; un contrefactuel garde la longueur de sa source. La
+  longueur, le ton et la présence d'une négation ne doivent jamais trahir la réponse : des
+  contextes vrais contiennent aussi des négations (« rien ne s'oppose au paiement ») ;
 - les contextes ne doivent jamais recopier mot pour mot une description.
 - mélange les formats : e-mail, SMS, note interne, extrait de compte rendu, message client.
 

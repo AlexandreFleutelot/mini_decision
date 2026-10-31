@@ -72,8 +72,13 @@ def generate_pairs(
     max_concurrency: int,
     log: Log = print,
     avoid_window: int = 30,
+    extra: list[tuple[LLMClient, int]] | None = None,
 ) -> list[RawPair]:
     """Génère `cfg.n_pairs` paires, réparties en tourniquet entre les sous-domaines.
+
+    `extra` ajoute des blocs de paires faites par d'autres générateurs, à la suite :
+    [(deepseek, 1000)] -> p_00000..p_02099 par le générateur principal, puis p_02100..p_03099
+    par deepseek. Le bloc principal ne change pas : il reste servi par le cache.
 
     Les appels partent par vagues de `max_concurrency` ; chaque vague reçoit la liste des
     propositions déjà générées dans son sous-domaine (les `avoid_window` dernières), pour
@@ -82,33 +87,42 @@ def generate_pairs(
     """
     plan = plan_kinds(cfg)
     system = prompts.SYSTEM_GENERATOR.format(language=cfg.language)
+    schedule = [client] * cfg.n_pairs
+    for other, n in extra or []:
+        schedule += [other] * n
+    clients = list(dict.fromkeys(schedule)) or [client]
+    total = len(schedule)
     done: list[RawPair] = []
     by_subdomain: dict[str, list[str]] = {s: [] for s in cfg.subdomains}
+    seen: set[str] = set()
+    n_duplicates = 0
 
     def one(i: int, avoid: list[str]) -> RawPair | None:
         subdomain = cfg.subdomains[i % len(cfg.subdomains)]
         prompt = _pair_prompt(cfg, plan, subdomain, avoid)
         try:
-            pair = clean_pair(client.complete_json(prompt, GeneratedPair, system=system, sample=i))
+            gen = schedule[i]
+            pair = clean_pair(gen.complete_json(prompt, GeneratedPair, system=system, sample=i))
         except BudgetExceeded:
             raise
         except LLMError as err:
-            log(f"  paire {i} ignorée : {err}")
+            log(f"  paire {i} ignorée ({schedule[i].model}) : {err}")
             return None
         return RawPair(
             pair_id=f"p_{i:05d}",
             subdomain=subdomain,
+            generator=gen.model,
             desc_true=pair.desc_true,
             desc_false=pair.desc_false,
             contexts=pair.contexts,
         )
 
     progress = Progress(
-        "datagen paires", cfg.n_pairs, log, every_s=0.0, extra=lambda: spend_summary([client])
+        "datagen paires", total, log, every_s=0.0, extra=lambda: spend_summary(clients)
     )
     with interruptible_pool(max_concurrency) as pool:
-        for start in range(0, cfg.n_pairs, max_concurrency):
-            wave = range(start, min(start + max_concurrency, cfg.n_pairs))
+        for start in range(0, total, max_concurrency):
+            wave = range(start, min(start + max_concurrency, total))
             avoids = [
                 by_subdomain[cfg.subdomains[i % len(cfg.subdomains)]][-avoid_window:] for i in wave
             ]
@@ -118,10 +132,18 @@ def generate_pairs(
                 log(f"Arrêt : {err}")
                 break
             for raw in results:
-                if raw is not None:
-                    done.append(raw)
-                    by_subdomain[raw.subdomain].append(raw.desc_true)
+                if raw is None:
+                    continue
+                key = " ".join(raw.desc_true.lower().split())
+                if key in seen:  # doublon exact d'une proposition déjà générée
+                    n_duplicates += 1
+                    continue
+                seen.add(key)
+                done.append(raw)
+                by_subdomain[raw.subdomain].append(raw.desc_true)
             progress.update(len(wave))
+    if n_duplicates:
+        log(f"  {n_duplicates} paires en double écartées")
     return done
 
 

@@ -32,12 +32,22 @@ Le calcul choisit automatiquement `cuda`, puis `mps` (Apple Silicon), puis `cpu`
 | Juge 1     | Anthropic `claude-haiku-5-5`     | `ANTHROPIC_API_KEY`                    |
 | Juge 2     | 2ᵉ tirage `claude-haiku-5-5`     | `ANTHROPIC_API_KEY` (variante Gemma local : `configs/judges_gemma.yaml`) |
 
-Un client OpenAI est aussi disponible (`provider: openai`, clé `OPENAI_API_KEY`).
+Un client OpenAI est aussi disponible (`provider: openai`, clé `OPENAI_API_KEY`), ainsi
+qu'OpenRouter (`provider: openrouter`, clé `OPENROUTER_API_KEY`) :
+
+- si le modèle refuse un schéma JSON imposé, le client passe au mode JSON simple puis au texte
+  libre (comme pour Ollama) ;
+- le coût réel de chaque appel est lu dans la réponse et compté dans le plafond ; les modèles
+  `:free` ne comptent pas mais sont limités en débit (`max_concurrency` par modèle) ;
+- `llm.extra_generators` ajoute des blocs de paires écrits par d'autres modèles, à la suite du
+  bloc principal (qui reste en cache) : voir `configs/openrouter_more.yaml` ;
+- `uv run mini-decision probe -m openrouter:z-ai/glm-5.3-flash -m openrouter:...` fait générer
+  une paire puis un jugement par chaque modèle et affiche durée, coût et exemple.
 
 - **Cache** : chaque appel est stocké dans `.cache/llm/` (clé = sha256 du fournisseur, du
   modèle, des prompts, du schéma et du numéro de tirage). Relancer une commande ne repaie
   jamais un appel.
-- **Plafond de dépense** : `llm.budget_usd` (10 $ par défaut), cumulé sur tous les runs dans
+- **Plafond de dépense** : `llm.budget_usd` (15 $ par défaut), cumulé sur tous les runs dans
   `.cache/llm/spend.json`. Une fois atteint, les nouveaux appels payants lèvent
   `BudgetExceeded` ; le cache et les modèles locaux restent utilisables.
 
@@ -73,11 +83,11 @@ uv run mini-decision calibrate          # temperature scaling                   
 uv run mini-decision evaluate           # métriques + diagramme de fiabilité
 uv run mini-decision report             # rapport Markdown comparatif
 uv run mini-decision params             # nombre de paramètres de chaque encodeur × tête
+uv run mini-decision scaling            # courbe d'échelle (train.scaling_sizes)         (jalon 4)
 uv run mini-decision adversarial-round  # une ronde model-in-the-loop                 (jalon 6)
 ```
 
-État : jalons 1 à 3 faits (`datagen`, `verify`, `split`, `train-tokenizer`, `params`) ;
-les autres commandes sont vides.
+État : jalons 1 à 4 faits ; `calibrate`, `evaluate`, `report` et `adversarial-round` sont vides.
 
 ### Données (jalon 2)
 
@@ -125,6 +135,29 @@ uv run pytest                          # inclut les tests de la section 8
 - **Masquage MLM** (`train/masking.py`) : mots entiers, 15 % des mots, poids ×3 pour les mots
   de négation (`ne`, `n'…`, `pas`, `jamais`, …) et ceux qui contiennent un chiffre ;
   80 % `[MASK]`, 10 % token aléatoire, 10 % inchangé.
+
+### Entraînement (jalon 4)
+
+```bash
+uv run mini-decision pretrain-mlm   # runs/mlm-<encodeur>/encoder.pt (+ log.jsonl)
+uv run mini-decision train          # runs/<run_name>/best.pt, summary.json, log.jsonl
+uv run mini-decision scaling        # runs/<run_name>-n<taille>/ + runs/<run_name>-scaling/scaling.{csv,png}
+uv run mini-decision train -c configs/transformer_dot.yaml   # variante (dot, cnn, ngram, no_mlm…)
+```
+
+- **MLM** : encodeur seul + tête liée à l'embedding, sur le non étiqueté et les textes de train ;
+  validation sur les textes de val. Le journal affiche aussi la précision sur les mots
+  suréchantillonnés (négation, nombres). Un checkpoint par type d'encodeur.
+- **Supervisé** : BCE sur labels souples, AdamW (pas de weight decay sur biais, normes et
+  embeddings), warmup 5 % puis cosinus, gradient clippé à 1. Les descriptions sont échangées
+  au hasard (`train.swap_prob`, label → 1 − label). α (RDA) monte de 0 à 1 sur la première
+  moitié ; le meilleur checkpoint (log-loss de val) et l'early stopping ne comptent qu'à α = 1.
+  `train.aux_mlm_lambda > 0` ajoute la perte MLM sur les contextes.
+- **Courbe d'échelle** : `train.scaling_sizes` (3k, 10k, 30k) ; chaque taille garde des paires
+  entières et les petits jeux sont inclus dans les grands. Une taille plus grande que le train
+  disponible est ramenée à tout le train (le train = 80 % des exemples gardés).
+- Métriques de validation : log-loss, accuracy (exemples dont le label ≠ 0,5), Brier, ECE
+  (15 tranches), AUROC hors sujet (score |P − 0,5|), accuracy sur les contrefactuels.
 
 ## Structure
 
