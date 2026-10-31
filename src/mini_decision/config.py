@@ -55,16 +55,20 @@ class DataConfig(_Strict):
 
 
 class LLMModelConfig(_Strict):
-    provider: Literal["anthropic", "openai", "ollama"]
+    provider: Literal["anthropic", "openai", "ollama", "openrouter"]
     model: str
     max_tokens: int = 4000
-    usd_per_m_in: float = 0.0
+    usd_per_m_in: float = 0.0  # inutile pour openrouter : le coût réel est renvoyé par l'API
     usd_per_m_out: float = 0.0
     host: str | None = None  # ollama uniquement
+    max_concurrency: int | None = None  # plafond d'appels simultanés pour ce modèle (modèles :free)
+    extra_body: dict[str, Any] | None = None  # openrouter : paramètres en plus (ex. reasoning)
+    n_pairs: int | None = None  # extra_generators uniquement : taille du bloc de paires
 
 
 class LLMConfig(_Strict):
     generator: LLMModelConfig
+    extra_generators: list[LLMModelConfig] = []  # blocs de paires en plus, à la suite
     judges: list[LLMModelConfig] = Field(min_length=1)
     budget_usd: float
     max_concurrency: int = 8

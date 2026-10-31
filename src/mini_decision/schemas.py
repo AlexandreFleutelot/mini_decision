@@ -87,6 +87,7 @@ class RawPair(BaseModel):
 
     pair_id: str
     subdomain: str
+    generator: str = ""  # modèle qui a écrit la paire
     desc_true: str
     desc_false: str
     contexts: list[GeneratedContext]

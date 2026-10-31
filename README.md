@@ -32,12 +32,22 @@ Le calcul choisit automatiquement `cuda`, puis `mps` (Apple Silicon), puis `cpu`
 | Juge 1     | Anthropic `claude-haiku-5-5`     | `ANTHROPIC_API_KEY`                    |
 | Juge 2     | 2ᵉ tirage `claude-haiku-5-5`     | `ANTHROPIC_API_KEY` (variante Gemma local : `configs/judges_gemma.yaml`) |
 
-Un client OpenAI est aussi disponible (`provider: openai`, clé `OPENAI_API_KEY`).
+Un client OpenAI est aussi disponible (`provider: openai`, clé `OPENAI_API_KEY`), ainsi
+qu'OpenRouter (`provider: openrouter`, clé `OPENROUTER_API_KEY`) :
+
+- si le modèle refuse un schéma JSON imposé, le client passe au mode JSON simple puis au texte
+  libre (comme pour Ollama) ;
+- le coût réel de chaque appel est lu dans la réponse et compté dans le plafond ; les modèles
+  `:free` ne comptent pas mais sont limités en débit (`max_concurrency` par modèle) ;
+- `llm.extra_generators` ajoute des blocs de paires écrits par d'autres modèles, à la suite du
+  bloc principal (qui reste en cache) : voir `configs/openrouter_more.yaml` ;
+- `uv run mini-decision probe -m openrouter:z-ai/glm-5.3-flash -m openrouter:...` fait générer
+  une paire puis un jugement par chaque modèle et affiche durée, coût et exemple.
 
 - **Cache** : chaque appel est stocké dans `.cache/llm/` (clé = sha256 du fournisseur, du
   modèle, des prompts, du schéma et du numéro de tirage). Relancer une commande ne repaie
   jamais un appel.
-- **Plafond de dépense** : `llm.budget_usd` (10 $ par défaut), cumulé sur tous les runs dans
+- **Plafond de dépense** : `llm.budget_usd` (15 $ par défaut), cumulé sur tous les runs dans
   `.cache/llm/spend.json`. Une fois atteint, les nouveaux appels payants lèvent
   `BudgetExceeded` ; le cache et les modèles locaux restent utilisables.
 

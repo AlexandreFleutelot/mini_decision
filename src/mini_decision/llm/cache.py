@@ -103,14 +103,17 @@ class CachedLLMClient(LLMClient):
             return schema.model_validate(entry["response"])
 
         self.misses += 1
-        paid = self.usd_per_m_in > 0 or self.usd_per_m_out > 0
+        paid = self.usd_per_m_in > 0 or self.usd_per_m_out > 0 or self.inner.reports_cost
         if self.tracker is not None and paid:
             self.tracker.check()
         result = self.inner.complete_json(prompt, schema, system=system, sample=sample)
         usage = self.inner.last_usage
-        usd = (
-            usage.input_tokens * self.usd_per_m_in + usage.output_tokens * self.usd_per_m_out
-        ) / 1e6
+        if usage.cost_usd is not None:
+            usd = usage.cost_usd
+        else:
+            usd = (
+                usage.input_tokens * self.usd_per_m_in + usage.output_tokens * self.usd_per_m_out
+            ) / 1e6
         if self.tracker is not None and paid:
             self.tracker.add(usd)
         path.parent.mkdir(parents=True, exist_ok=True)

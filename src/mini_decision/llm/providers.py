@@ -192,3 +192,123 @@ def _extract_json(text: str) -> dict:
     if start == -1 or end < start:
         raise ValueError("aucun objet JSON dans la réponse")
     return json.loads(text[start : end + 1])
+
+
+class OpenRouterClient(LLMClient):
+    """Modèles servis par OpenRouter (API compatible OpenAI). Clé : OPENROUTER_API_KEY.
+
+    Tous les modèles n'acceptent pas un schéma JSON imposé. Comme pour Ollama, on essaie
+    dans l'ordre : schéma strict, puis mode JSON simple, puis texte libre avec les clés
+    décrites dans le prompt ; le mode qui marche est mémorisé. Le coût réel de chaque appel
+    est demandé à OpenRouter (usage.cost) et compté dans le plafond llm.budget_usd ; les
+    modèles « :free » coûtent 0 mais sont limités en débit (d'où max_concurrency).
+    """
+
+    provider = "openrouter"
+    reports_cost = True
+    MODES = ("schema", "json", "text")
+    BASE_URL = "https://openrouter.ai/api/v1"
+
+    def __init__(
+        self,
+        model: str,
+        max_tokens: int = 4000,
+        max_concurrency: int | None = None,
+        extra_body: dict | None = None,
+        max_attempts: int = 3,
+    ) -> None:
+        import os
+
+        import openai
+
+        key = os.environ.get("OPENROUTER_API_KEY")
+        if not key:
+            raise LLMError("OPENROUTER_API_KEY absente : export OPENROUTER_API_KEY=...")
+        self.model = model
+        self.reports_cost = not model.endswith(":free")  # les modèles gratuits ignorent le plafond
+        self.max_tokens = max_tokens
+        self.max_attempts = max_attempts
+        self.extra_body = extra_body or {}
+        self.mode = "schema"
+        self._client = openai.OpenAI(base_url=self.BASE_URL, api_key=key, max_retries=4)
+        self._lock = threading.Lock()
+        self._slots = threading.Semaphore(max_concurrency) if max_concurrency else None
+
+    def _request(self, messages: list[dict], schema: type[T], seed: int):  # noqa: ANN202
+        import openai
+
+        while True:
+            mode = self.mode
+            body: dict = {"usage": {"include": True}, **self.extra_body}
+            msgs = messages
+            if mode == "schema":
+                response_format = {
+                    "type": "json_schema",
+                    "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()},
+                }
+                # Route seulement vers un hébergeur qui respecte vraiment response_format.
+                body["provider"] = {"require_parameters": True, **body.get("provider", {})}
+            else:
+                response_format = {"type": "json_object"} if mode == "json" else None
+                last = {**messages[-1], "content": messages[-1]["content"] + "\n\n" + _format_hint(schema)}
+                msgs = [*messages[:-1], last]
+            kwargs = {"response_format": response_format} if response_format else {}
+            try:
+                return self._client.chat.completions.create(
+                    model=self.model,
+                    messages=msgs,
+                    max_tokens=self.max_tokens,
+                    seed=seed,
+                    extra_body=body,
+                    **kwargs,
+                )
+            except (openai.BadRequestError, openai.NotFoundError, openai.UnprocessableEntityError) as err:
+                # 400/404/422 en mode schema/json : format non supporté par ce modèle -> mode suivant.
+                if mode != "text":
+                    with self._lock:
+                        if self.mode == mode:
+                            self.mode = self.MODES[self.MODES.index(mode) + 1]
+                    continue
+                raise LLMError(f"OpenRouter : {err}") from err
+            except (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError) as err:
+                raise LLMError(f"OpenRouter : {err}") from err
+            except openai.APIStatusError as err:  # 402 crédit épuisé, 403 modération...
+                raise LLMError(f"OpenRouter (HTTP {err.status_code}) : {err}") from err
+
+    def complete_json(
+        self, prompt: str, schema: type[T], *, system: str = "", sample: int = 0
+    ) -> T:
+        messages = [{"role": "user", "content": prompt}]
+        if system:
+            messages.insert(0, {"role": "system", "content": system})
+        error: Exception | None = None
+        cost = 0.0
+        tokens_in = tokens_out = 0
+        for attempt in range(self.max_attempts):
+            if self._slots is not None:
+                with self._slots:
+                    completion = self._request(messages, schema, seed=sample * 1000 + attempt)
+            else:
+                completion = self._request(messages, schema, seed=sample * 1000 + attempt)
+            usage = completion.usage
+            if usage is not None:
+                tokens_in += usage.prompt_tokens or 0
+                tokens_out += usage.completion_tokens or 0
+                cost += float(getattr(usage, "cost", None) or (usage.model_extra or {}).get("cost") or 0.0)
+            self.last_usage = Usage(tokens_in, tokens_out, cost)  # les essais ratés sont payés aussi
+            if not completion.choices:
+                error = ValueError("réponse vide")
+                continue
+            choice = completion.choices[0]
+            try:
+                data = _unwrap(_extract_json(_strip_thinking(choice.message.content or "")))
+                return schema.model_validate(data)
+            except ValueError as err:
+                error = err if choice.finish_reason != "length" else ValueError("sortie tronquée (max_tokens)")
+        raise LLMError(f"JSON invalide renvoyé par {self.model} ({self.max_attempts} essais) : {error}")
+
+
+def _strip_thinking(text: str) -> str:
+    """Retire un bloc <think>...</think> (modèles de raisonnement) avant de chercher le JSON."""
+    end = text.rfind("</think>")
+    return text[end + len("</think>") :] if end != -1 else text

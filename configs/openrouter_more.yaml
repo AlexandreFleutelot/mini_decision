@@ -1,0 +1,11 @@
+# Agrandit le jeu avec d'autres générateurs via OpenRouter (export OPENROUTER_API_KEY=...).
+# Les 2 100 paires Haiku restent identiques (cache) ; les blocs ci-dessous s'ajoutent à la suite.
+# Coût réel lu dans chaque réponse OpenRouter et compté dans llm.budget_usd ; modèles :free
+# gratuits mais limités en débit (d'où max_concurrency bas). Choisir les modèles avec
+# `uv run mini-decision probe -m openrouter:<modèle> ...`.
+inherit: base.yaml
+run_name: openrouter_more
+llm:
+  extra_generators:
+    - {provider: openrouter, model: deepseek/deepseek-v4.1-flash-1017, max_tokens: 16000, n_pairs: 1000, max_concurrency: 8}
+    - {provider: openrouter, model: "google/gemma-4-31b-it:free", max_tokens: 16000, n_pairs: 500, max_concurrency: 2}

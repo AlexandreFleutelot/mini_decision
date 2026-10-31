@@ -17,6 +17,7 @@ COMMANDS = [
     "report",
     "params",
     "scaling",
+    "probe",
 ]
 NOT_YET_IMPLEMENTED = ["calibrate", "evaluate", "adversarial-round", "report"]
 

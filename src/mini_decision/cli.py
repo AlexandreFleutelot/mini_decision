@@ -66,17 +66,25 @@ def datagen(
     cfg = _setup(config, set_)
     tracker = _tracker(cfg)
     client = make_client(cfg.llm.generator, cfg.paths.llm_cache_dir, tracker)
-    typer.echo(f"[datagen] {cfg.data.n_pairs} paires, contextes par paire : {plan_kinds(cfg.data)}")
-    pairs = generate_pairs(cfg.data, client, cfg.llm.max_concurrency, typer.echo)
+    extra = [
+        (make_client(g, cfg.paths.llm_cache_dir, tracker), g.n_pairs or 0) for g in cfg.llm.extra_generators
+    ]
+    blocks = ", ".join(f"{c.model} {n}" for c, n in [(client, cfg.data.n_pairs), *extra])
+    typer.echo(f"[datagen] paires : {blocks} · contextes par paire : {plan_kinds(cfg.data)}")
+    pairs = generate_pairs(cfg.data, client, cfg.llm.max_concurrency, typer.echo, extra=extra)
     n = write_jsonl(cfg.paths.raw_dir / "pairs.jsonl", pairs)
     n_contexts = sum(len(p.contexts) for p in pairs)
     typer.echo(f"[datagen] {n} paires, {n_contexts} contextes -> {cfg.paths.raw_dir}/pairs.jsonl")
     if not skip_unlabeled:
-        n_texts = round(cfg.data.unlabeled_ratio * n_contexts)
+        # Le non étiqueté suit le bloc principal seulement : ajouter des générateurs ne le
+        # régénère pas (61k textes suffisent largement pour le MLM).
+        main = sum(len(p.contexts) for p in pairs if int(p.pair_id[2:]) < cfg.data.n_pairs)
+        n_texts = round(cfg.data.unlabeled_ratio * main)
         texts = generate_unlabeled(cfg.data, client, n_texts, cfg.llm.max_concurrency, typer.echo)
         write_jsonl(cfg.paths.raw_dir / "unlabeled.jsonl", (UnlabeledText(text=t) for t in texts))
         typer.echo(f"[datagen] {len(texts)} textes -> {cfg.paths.raw_dir}/unlabeled.jsonl")
-    typer.echo(f"[cache] {client.hits} réutilisés, {client.misses} nouveaux appels")
+    gens = [client, *(c for c, _ in extra)]
+    typer.echo(f"[cache] {sum(c.hits for c in gens)} réutilisés, {sum(c.misses for c in gens)} nouveaux appels")
     _spent(tracker)
 
 
@@ -145,6 +153,60 @@ def split(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
     )
     (out / "stats.md").write_text(report, encoding="utf-8")
     typer.echo(f"[split] rapport -> {out}/stats.md")
+
+
+@app.command()
+def probe(
+    model: Annotated[
+        list[str], typer.Option("--model", "-m", help="fournisseur:modèle, ex. openrouter:z-ai/glm-5.3-flash")
+    ],
+    config: ConfigOpt = DEFAULT_CONFIG,
+    set_: SetOpt = None,
+    max_tokens: Annotated[int, typer.Option(help="max_tokens de la génération.")] = 16000,
+) -> None:
+    """Teste des modèles : une paire générée puis jugée par le modèle lui-même (durée, coût, validité)."""
+    import time
+
+    from mini_decision.config import LLMModelConfig
+    from mini_decision.datagen.generate import _pair_prompt, clean_pair, plan_kinds
+    from mini_decision.llm import LLMError, make_client
+    from mini_decision.llm import prompts
+    from mini_decision.schemas import GeneratedPair, Judgment
+
+    cfg = _setup(config, set_)
+    tracker = _tracker(cfg)
+    plan = plan_kinds(cfg.data)
+    system = prompts.SYSTEM_GENERATOR.format(language=cfg.data.language)
+    for spec in model:
+        provider, _, name = spec.partition(":")
+        client = make_client(
+            LLMModelConfig(provider=provider, model=name, max_tokens=max_tokens), cfg.paths.llm_cache_dir, tracker
+        )
+        before, t0 = tracker.spent_usd, time.monotonic()
+        try:
+            pair = clean_pair(client.complete_json(
+                _pair_prompt(cfg.data, plan, cfg.data.subdomains[0], []), GeneratedPair, system=system, sample=-1
+            ))
+            t_gen = time.monotonic() - t0
+            kinds = {k.value: sum(c.kind is k for c in pair.contexts) for k in {c.kind for c in pair.contexts}}
+            ctx = pair.contexts[0]
+            t1 = time.monotonic()
+            judgment = client.complete_json(
+                prompts.JUDGE.format(context=ctx.text, desc_true=pair.desc_true, desc_false=pair.desc_false),
+                Judgment, system=prompts.SYSTEM_JUDGE, sample=-1,
+            )
+            t_judge = time.monotonic() - t1
+        except LLMError as err:
+            typer.secho(f"[probe] {spec} : ÉCHEC {err}", fg="red")
+            continue
+        mode = getattr(client.inner, "mode", "schema")
+        typer.echo(
+            f"[probe] {spec} · génération {t_gen:.1f} s, {len(pair.contexts)} contextes {kinds} · "
+            f"jugement {t_judge:.1f} s (kind {ctx.kind.value} -> p_vrai {judgment.p_true:.2f}, "
+            f"hors sujet {judgment.off_topic}) · mode {mode} · coût {tracker.spent_usd - before:.4f} $"
+        )
+        typer.echo(f"         VRAI : {pair.desc_true}\n         FAUX : {pair.desc_false}\n         ex. : {ctx.text}")
+    _spent(tracker)
 
 
 @app.command("train-tokenizer")
