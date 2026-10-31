@@ -89,8 +89,10 @@ def judge_all(
             context=c.context, desc_true=c.desc_true, desc_false=c.desc_false
         )
         try:
+            # sample=k : deux entrées du même modèle donnent deux tirages indépendants.
             judgments = [
-                j.complete_json(prompt, Judgment, system=prompts.SYSTEM_JUDGE) for j in judges
+                j.complete_json(prompt, Judgment, system=prompts.SYSTEM_JUDGE, sample=k)
+                for k, j in enumerate(judges)
             ]
         except BudgetExceeded:
             raise

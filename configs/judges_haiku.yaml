@@ -1,0 +1,7 @@
+# Juges = deux tirages indépendants de Haiku (au lieu de Haiku + Gemma local).
+# Usage : uv run mini-decision verify -c configs/judges_haiku.yaml
+inherit: base.yaml
+llm:
+  judges:
+    - {provider: anthropic, model: claude-haiku-5-5, max_tokens: 4000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}
+    - {provider: anthropic, model: claude-haiku-5-5, max_tokens: 4000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}

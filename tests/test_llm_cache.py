@@ -129,7 +129,7 @@ def test_ollama_falls_back_when_structured_output_unavailable(
         formats.append(kwargs["format"])
         if isinstance(kwargs["format"], dict):
             raise ollama.ResponseError("structured output is unavailable", 501)
-        assert "schéma" in kwargs["messages"][-1]["content"]  # schéma décrit dans le prompt
+        assert "« p_true » (nombre)" in kwargs["messages"][-1]["content"]  # clés en clair
         return SimpleNamespace(
             message=SimpleNamespace(content='```json\n{"off_topic": true, "p_true": 0.5}\n```'),
             prompt_eval_count=1,
@@ -142,3 +142,12 @@ def test_ollama_falls_back_when_structured_output_unavailable(
     assert client.complete_json("q", Judgment).off_topic is True
     assert formats[0] != "json" and formats[1:] == ["json", "json"]  # bascule mémorisée
     assert client.mode == "json"
+
+
+def test_unwrap_schema_imitation() -> None:
+    from mini_decision.llm.providers import _unwrap
+
+    imitated = {"type": "object", "properties": {"off_topic": False, "p_true": 0.2}}
+    assert _unwrap(imitated) == {"off_topic": False, "p_true": 0.2}
+    real_schema = {"properties": {"p_true": {"type": "number"}}}
+    assert _unwrap(real_schema) == real_schema  # un vrai schéma reste invalide -> retentative

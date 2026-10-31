@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import threading
 
+from pydantic import BaseModel
+
 from mini_decision.llm.base import LLMClient, LLMError, T, Usage
 
 
@@ -113,10 +115,7 @@ class OllamaClient(LLMClient):
             fmt = {"schema": schema.model_json_schema(), "json": "json", "text": None}[mode]
             msgs = messages
             if mode != "schema":
-                hint = (
-                    "\n\nRéponds uniquement par un objet JSON conforme à ce schéma :\n"
-                    + json.dumps(schema.model_json_schema(), ensure_ascii=False)
-                )
+                hint = "\n\n" + _format_hint(schema)
                 last = {**messages[-1], "content": messages[-1]["content"] + hint}
                 msgs = [*messages[:-1], last]
             try:
@@ -149,10 +148,42 @@ class OllamaClient(LLMClient):
             response = self._chat(messages, schema, seed=sample * 1000 + attempt)
             self.last_usage = Usage(response.prompt_eval_count or 0, response.eval_count or 0)
             try:
-                return schema.model_validate(_extract_json(response.message.content or ""))
+                data = _unwrap(_extract_json(response.message.content or ""))
+                return schema.model_validate(data)
             except ValueError as err:
                 error = err
         raise LLMError(f"JSON invalide renvoyé par Ollama ({self.max_attempts} essais) : {error}")
+
+
+_TYPE_NAMES = {
+    "boolean": "booléen",
+    "number": "nombre",
+    "integer": "entier",
+    "string": "texte",
+    "array": "liste",
+    "object": "objet",
+}
+
+
+def _format_hint(schema: type[BaseModel]) -> str:
+    """Consigne en clair (pas le schéma JSON brut, que les petits modèles recopient)."""
+    props = schema.model_json_schema().get("properties", {})
+    fields = ", ".join(
+        f"« {name} » ({_TYPE_NAMES.get(spec.get('type', ''), 'valeur')})"
+        for name, spec in props.items()
+    )
+    return (
+        "Réponds uniquement par un objet JSON plat (pas un schéma, pas de texte autour) "
+        f"avec exactement ces clés : {fields}."
+    )
+
+
+def _unwrap(data: dict) -> dict:
+    """Si le modèle a imité un schéma ({"properties": {...valeurs...}}), en extrait les valeurs."""
+    inner = data.get("properties")
+    if isinstance(inner, dict) and not any(isinstance(v, dict) for v in inner.values()):
+        return inner
+    return data
 
 
 def _extract_json(text: str) -> dict:
