@@ -120,9 +120,13 @@ class MLMConfig(_Strict):
     mask_token_prob: float  # parmi les tokens masqués : part remplacée par [MASK]
     random_token_prob: float  # part remplacée par un token aléatoire (le reste est inchangé)
     lr: float
+    weight_decay: float
+    warmup_frac: float
+    grad_clip: float
     batch_size: int
     max_epochs: int
     patience: int
+    run_name: str  # checkpoint : <runs_dir>/<run_name>-<encodeur>/encoder.pt
 
 
 class TrainConfig(_Strict):
@@ -136,6 +140,9 @@ class TrainConfig(_Strict):
     aux_mlm_lambda: float
     rda_alpha_end_frac: float
     init_from_mlm: bool
+    swap_prob: float  # échange desc_vrai/desc_faux (label -> 1 − label) : la position ne dit rien
+    max_train_examples: int | None  # sous-échantillon par paires (courbe d'échelle) ; None = tout
+    scaling_sizes: list[int]
 
 
 class AdversarialConfig(_Strict):

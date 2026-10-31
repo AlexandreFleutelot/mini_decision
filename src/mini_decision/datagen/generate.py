@@ -84,6 +84,8 @@ def generate_pairs(
     system = prompts.SYSTEM_GENERATOR.format(language=cfg.language)
     done: list[RawPair] = []
     by_subdomain: dict[str, list[str]] = {s: [] for s in cfg.subdomains}
+    seen: set[str] = set()
+    n_duplicates = 0
 
     def one(i: int, avoid: list[str]) -> RawPair | None:
         subdomain = cfg.subdomains[i % len(cfg.subdomains)]
@@ -118,10 +120,18 @@ def generate_pairs(
                 log(f"Arrêt : {err}")
                 break
             for raw in results:
-                if raw is not None:
-                    done.append(raw)
-                    by_subdomain[raw.subdomain].append(raw.desc_true)
+                if raw is None:
+                    continue
+                key = " ".join(raw.desc_true.lower().split())
+                if key in seen:  # doublon exact d'une proposition déjà générée
+                    n_duplicates += 1
+                    continue
+                seen.add(key)
+                done.append(raw)
+                by_subdomain[raw.subdomain].append(raw.desc_true)
             progress.update(len(wave))
+    if n_duplicates:
+        log(f"  {n_duplicates} paires en double écartées")
     return done
 
 

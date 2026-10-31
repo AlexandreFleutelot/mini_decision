@@ -36,6 +36,16 @@ def _spent(tracker: SpendTracker) -> None:
     typer.echo(f"[budget] {tracker.spent_usd:.4f} $ dépensés sur {tracker.budget_usd:.2f} $")
 
 
+def _tokenizer(cfg: Config):  # noqa: ANN202
+    from mini_decision.tokenizer import Tokenizer
+
+    path = cfg.paths.tokenizer_prefix.with_suffix(".model")
+    if not path.exists():
+        typer.secho(f"{path} absent : lancer train-tokenizer d'abord", fg="red")
+        raise typer.Exit(1)
+    return Tokenizer(path)
+
+
 def _todo(step: str, milestone: int) -> None:
     typer.echo(f"[{step}] pas encore implémenté (jalon {milestone}).")
 
@@ -182,15 +192,76 @@ def params(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
 @app.command("pretrain-mlm")
 def pretrain_mlm(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
     """Pré-entraîne l'encodeur en MLM (masquage par mots entiers)."""
-    _setup(config, set_)
-    _todo("pretrain-mlm", 4)
+    from mini_decision.train.data import mlm_texts
+    from mini_decision.train.mlm import pretrain_mlm as run_mlm
+
+    cfg = _setup(config, set_)
+    tok = _tokenizer(cfg)
+    out = cfg.paths.processed_dir
+    train = read_jsonl(out / "train.jsonl", Example)
+    val = read_jsonl(out / "val.jsonl", Example)
+    unlabeled_path = cfg.paths.raw_dir / "unlabeled.jsonl"
+    unlabeled = [u.text for u in read_jsonl(unlabeled_path, UnlabeledText)] if unlabeled_path.exists() else []
+    # Le non étiqueté sert à l'entraînement ; la validation MLM = contextes et descriptions de val.
+    run_mlm(cfg, tok, mlm_texts(train, unlabeled), mlm_texts(val, []), get_device(cfg.device), typer.echo)
 
 
 @app.command()
 def train(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
     """Entraînement supervisé (BCE sur labels souples)."""
-    _setup(config, set_)
-    _todo("train", 4)
+    from mini_decision.train.supervised import run_dir, train_supervised
+
+    cfg = _setup(config, set_)
+    tok = _tokenizer(cfg)
+    out = cfg.paths.processed_dir
+    train_supervised(
+        cfg,
+        tok,
+        read_jsonl(out / "train.jsonl", Example),
+        read_jsonl(out / "val.jsonl", Example),
+        get_device(cfg.device),
+        run_dir(cfg),
+        typer.echo,
+    )
+
+
+@app.command()
+def scaling(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
+    """Courbe d'échelle : un entraînement par taille de train.scaling_sizes (paires emboîtées)."""
+    import csv
+
+    from mini_decision.eval.plots import scaling_plot
+    from mini_decision.train.supervised import run_dir, train_supervised
+
+    cfg = _setup(config, set_)
+    tok = _tokenizer(cfg)
+    out = cfg.paths.processed_dir
+    train = read_jsonl(out / "train.jsonl", Example)
+    val = read_jsonl(out / "val.jsonl", Example)
+    rows = []
+    for size in cfg.train.scaling_sizes:
+        if size > len(train):
+            typer.secho(f"[scaling] {size} > {len(train)} exemples disponibles : taille ignorée", fg="yellow")
+            continue
+        sized = cfg.model_copy(update={"train": cfg.train.model_copy(update={"max_train_examples": size})})
+        summary = train_supervised(sized, tok, train, val, get_device(cfg.device), run_dir(cfg, f"-n{size}"), typer.echo)
+        rows.append({"n_train": summary["n_train"], **summary["val"]})
+    if not rows:
+        typer.secho("[scaling] aucune taille réalisable : générer plus de données", fg="red")
+        raise typer.Exit(1)
+    dest = run_dir(cfg, "-scaling")
+    dest.mkdir(parents=True, exist_ok=True)
+    with (dest / "scaling.csv").open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    scaling_plot(rows, dest / "scaling.png", title=cfg.run_name)
+    for r in rows:
+        typer.echo(
+            f"[scaling] n={r['n_train']:>6} · log-loss {r['log_loss']:.4f} · acc {r['accuracy']:.3f} · "
+            f"ECE {r['ece']:.4f} · AUROC hors sujet {r['off_topic_auroc']:.3f}"
+        )
+    typer.echo(f"[scaling] -> {dest}/scaling.csv, scaling.png")
 
 
 @app.command()
