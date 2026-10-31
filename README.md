@@ -72,10 +72,12 @@ uv run mini-decision train              # supervisé, BCE sur labels souples
 uv run mini-decision calibrate          # temperature scaling                         (jalon 5)
 uv run mini-decision evaluate           # métriques + diagramme de fiabilité
 uv run mini-decision report             # rapport Markdown comparatif
+uv run mini-decision params             # nombre de paramètres de chaque encodeur × tête
 uv run mini-decision adversarial-round  # une ronde model-in-the-loop                 (jalon 6)
 ```
 
-État : jalons 1 et 2 faits (`datagen`, `verify`, `split`) ; les autres commandes sont vides.
+État : jalons 1 à 3 faits (`datagen`, `verify`, `split`, `train-tokenizer`, `params`) ;
+les autres commandes sont vides.
 
 ### Données (jalon 2)
 
@@ -94,6 +96,35 @@ uv run mini-decision split     # data/processed/{train,val,test,test_counterfact
   seul* (détecte les artefacts de style, par exemple « la négation indique toujours le faux »).
 - Toutes les statistiques et 10 exemples par kind sont dans `data/processed/stats.md`.
 - Les commandes sont relançables : les appels déjà faits viennent du cache.
+
+### Tokenizer et modèle (jalon 3)
+
+```bash
+uv run mini-decision train-tokenizer   # data/processed/tokenizer/spm.{model,vocab}
+uv run mini-decision params            # tableau des tailles (encodeur × tête × covariance)
+uv run pytest                          # inclut les tests de la section 8
+```
+
+- **Tokenizer** : SentencePiece unigram (vocab 4000) appris sur contextes, descriptions et
+  corpus non étiqueté. Ids fixes : `[PAD]`=0, `<unk>`=1, `[CLS]`=2, `[MASK]`=3, `[CTX]`=4,
+  `[DESC]`=5. Chaque séquence commence par `[CLS]`.
+- **Encodeur siamois** (`model/encoders.py`), partagé entre contexte et descriptions, avec un
+  type embedding (0 = contexte, 1 = description) et un pooling par attention :
+  `transformer` (pre-LN, 3 couches, d=128, 4 têtes, FFN 512 : 1,13 M paramètres au total),
+  `cnn` (4 convolutions dilatées 1/2/4/8 : 0,72 M), `ngram` (unigrammes + 2/3-grammes hachés
+  dans 4096 cases : 1,11 M).
+- **Tête QDA** (`model/heads.py`) : z = LayerNorm sans paramètres(Linear(h_ctx)) ∈ R¹⁶. Chaque
+  description donne un nuage gaussien (μ, L) avec précision P = L Lᵀ, diagonale de L bornée
+  dans [1/s_max, 1/s_min] ; `cov: full` ajoute les termes croisés. Score
+  s = −½‖Lᵀ(z−μ)‖² + Σ log Lᵢᵢ. Régularisation RDA : P_α = α·L Lᵀ + (1−α)·L₀ L₀ᵀ, α piloté
+  par l'entraînement de 0 à 1.
+- **Porte et sortie** : g = sigmoid(max(s_vrai, s_faux) − τ), P(vrai) = sigmoid(g·(s_vrai − s_faux) + b).
+  Un contexte loin des deux nuages donne g ≈ 0, donc P ≈ 0,5. `tau_init: auto` fixe τ au premier
+  batch d'entraînement pour que la porte démarre vers 0,5.
+- **Tête dot** (baseline) : s = ⟨z, e_d⟩ / √k, même porte.
+- **Masquage MLM** (`train/masking.py`) : mots entiers, 15 % des mots, poids ×3 pour les mots
+  de négation (`ne`, `n'…`, `pas`, `jamais`, …) et ceux qui contiennent un chiffre ;
+  80 % `[MASK]`, 10 % token aléatoire, 10 % inchangé.
 
 ## Structure
 

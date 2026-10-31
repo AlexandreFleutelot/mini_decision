@@ -21,6 +21,7 @@ class PathsConfig(_Strict):
     real_calibration: Path
     llm_cache_dir: Path
     runs_dir: Path
+    tokenizer_prefix: Path  # SentencePiece écrit <prefix>.model et <prefix>.vocab
 
 
 class SplitConfig(_Strict):
@@ -103,6 +104,7 @@ class ModelConfig(_Strict):
     k: int
     s_min: float
     s_max: float
+    tau_init: float | Literal["auto"]  # auto : moyenne de max(s_vrai, s_faux) au 1er batch
     max_len: int
     dropout: float
     transformer: TransformerConfig
@@ -115,6 +117,8 @@ class MLMConfig(_Strict):
     oversample_factor: float
     oversample_words: list[str]
     oversample_numbers: bool
+    mask_token_prob: float  # parmi les tokens masqués : part remplacée par [MASK]
+    random_token_prob: float  # part remplacée par un token aléatoire (le reste est inchangé)
     lr: float
     batch_size: int
     max_epochs: int

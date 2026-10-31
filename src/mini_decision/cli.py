@@ -140,8 +140,43 @@ def split(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
 @app.command("train-tokenizer")
 def train_tokenizer(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
     """Entraîne le tokenizer SentencePiece sur tout le corpus synthétique."""
-    _setup(config, set_)
-    _todo("train-tokenizer", 3)
+    from mini_decision.tokenizer import corpus_texts
+    from mini_decision.tokenizer import train_tokenizer as train_spm
+
+    cfg = _setup(config, set_)
+    texts = corpus_texts(cfg)
+    n_words = sum(len(t.split()) for t in texts)
+    typer.echo(f"[tokenizer] {len(texts)} textes, {n_words} mots, vocab cible {cfg.tokenizer.vocab_size}")
+    tok = train_spm(texts, cfg.tokenizer, cfg.paths.tokenizer_prefix)
+    lengths = sorted(len(tok.encode(t, 10_000)) for t in texts)
+    over = sum(n > cfg.model.max_len for n in lengths)
+    typer.echo(
+        f"[tokenizer] vocab {tok.vocab_size} -> {cfg.paths.tokenizer_prefix}.model · "
+        f"tokens/texte médiane {lengths[len(lengths) // 2]}, max {lengths[-1]}, "
+        f"{over} textes tronqués à {cfg.model.max_len}"
+    )
+    example = "Le colis n'est pas arrivé, aucun remboursement avant le 12 mars."
+    typer.echo(f"[tokenizer] exemple : {' '.join(tok.pieces(example))}")
+
+
+@app.command()
+def params(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
+    """Affiche le nombre de paramètres de chaque encodeur × tête (et de la config choisie)."""
+    from mini_decision.config import load_config
+    from mini_decision.model import build_model, parameter_table
+    from mini_decision.tokenizer import Tokenizer
+
+    cfg = _setup(config, set_)
+    model_path = cfg.paths.tokenizer_prefix.with_suffix(".model")
+    vocab = Tokenizer(model_path).vocab_size if model_path.exists() else cfg.tokenizer.vocab_size
+    typer.echo(f"[params] vocab {vocab}")
+    for encoder in ("ngram", "cnn", "transformer"):
+        for head, cov in (("dot", "diag"), ("qda", "diag"), ("qda", "full")):
+            sets = [*(set_ or []), f"model.encoder={encoder}", f"model.head={head}", f"model.cov={cov}"]
+            table = parameter_table(build_model(vocab, load_config(config, sets).model))
+            mark = " <- config" if (encoder, head, cov) == (cfg.model.encoder, cfg.model.head, cfg.model.cov) else ""
+            detail = ", ".join(f"{k} {v:,}" for k, v in table.items() if k != "total")
+            typer.echo(f"  {encoder:<11} {head}/{cov:<4} {table['total']:>10,}  ({detail}){mark}")
 
 
 @app.command("pretrain-mlm")
