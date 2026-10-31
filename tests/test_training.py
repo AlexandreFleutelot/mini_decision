@@ -82,4 +82,5 @@ def test_pipeline_end_to_end(tmp_path: Path, encoder: str) -> None:
     assert summary["n_train"] == 24 * 7
     assert 0 <= summary["val"]["log_loss"] < 5
     assert (runs / "debug-scaling" / "scaling.png").exists()
-    assert "taille ignorée" in result.output  # 100000 > disponible
+    assert "le dernier point utilise tout" in result.output  # 100000 > disponible
+    assert (runs / f"debug-n{24 * 7}" / "summary.json").exists()

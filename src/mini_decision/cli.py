@@ -239,10 +239,10 @@ def scaling(config: ConfigOpt = DEFAULT_CONFIG, set_: SetOpt = None) -> None:
     train = read_jsonl(out / "train.jsonl", Example)
     val = read_jsonl(out / "val.jsonl", Example)
     rows = []
-    for size in cfg.train.scaling_sizes:
-        if size > len(train):
-            typer.secho(f"[scaling] {size} > {len(train)} exemples disponibles : taille ignorée", fg="yellow")
-            continue
+    sizes = sorted({min(size, len(train)) for size in cfg.train.scaling_sizes})
+    if max(cfg.train.scaling_sizes) > len(train):
+        typer.secho(f"[scaling] seulement {len(train)} exemples de train : le dernier point utilise tout", fg="yellow")
+    for size in sizes:
         sized = cfg.model_copy(update={"train": cfg.train.model_copy(update={"max_train_examples": size})})
         summary = train_supervised(sized, tok, train, val, get_device(cfg.device), run_dir(cfg, f"-n{size}"), typer.echo)
         rows.append({"n_train": summary["n_train"], **summary["val"]})

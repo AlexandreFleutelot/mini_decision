@@ -145,7 +145,7 @@ uv run mini-decision train -c configs/transformer_dot.yaml   # variante (dot, cn
   `train.aux_mlm_lambda > 0` ajoute la perte MLM sur les contextes.
 - **Courbe d'échelle** : `train.scaling_sizes` (3k, 10k, 30k) ; chaque taille garde des paires
   entières et les petits jeux sont inclus dans les grands. Une taille plus grande que le train
-  disponible est ignorée.
+  disponible est ramenée à tout le train (le train = 80 % des exemples gardés).
 - Métriques de validation : log-loss, accuracy (exemples dont le label ≠ 0,5), Brier, ECE
   (15 tranches), AUROC hors sujet (score |P − 0,5|), accuracy sur les contrefactuels.
 
