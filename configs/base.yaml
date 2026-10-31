@@ -14,6 +14,7 @@ paths:
   real_calibration: data/real_calibration.jsonl
   llm_cache_dir: .cache/llm
   runs_dir: runs
+  tokenizer_prefix: data/processed/tokenizer/spm
 
 data:
   domain: "documents et échanges administratifs d'entreprise"
@@ -61,17 +62,20 @@ model:
   k: 16
   s_min: 0.05
   s_max: 5.0
+  tau_init: auto
   max_len: 128
   dropout: 0.1
   transformer: {n_layers: 3, d_model: 128, n_heads: 4, d_ff: 512}
   cnn: {n_layers: 4, d_model: 128, kernel_size: 3, dilations: [1, 2, 4, 8]}
-  ngram: {n_max: 3, n_buckets: 50000, d_model: 128, hidden: 256}
+  ngram: {n_max: 3, n_buckets: 4096, d_model: 128, hidden: 256}  # taille ≈ transformer
 
 mlm:
   mask_prob: 0.15
   oversample_factor: 3.0
   oversample_words: [ne, "n'", pas, jamais, aucun, aucune, plus, rien, sauf, sans, ni]
   oversample_numbers: true
+  mask_token_prob: 0.8
+  random_token_prob: 0.1
   lr: 1.0e-3
   batch_size: 256
   max_epochs: 50
