@@ -30,7 +30,7 @@ Le calcul choisit automatiquement `cuda`, puis `mps` (Apple Silicon), puis `cpu`
 |------------|----------------------------------|----------------------------------------|
 | Générateur | Anthropic `claude-haiku-5-5`     | `ANTHROPIC_API_KEY`                    |
 | Juge 1     | Anthropic `claude-haiku-5-5`     | `ANTHROPIC_API_KEY`                    |
-| Juge 2     | Ollama local `gemma4:e4b`        | app Ollama lancée + `ollama pull gemma4:e4b` |
+| Juge 2     | 2ᵉ tirage `claude-haiku-5-5`     | `ANTHROPIC_API_KEY` (variante Gemma local : `configs/judges_gemma.yaml`) |
 
 Un client OpenAI est aussi disponible (`provider: openai`, clé `OPENAI_API_KEY`).
 
@@ -75,7 +75,25 @@ uv run mini-decision report             # rapport Markdown comparatif
 uv run mini-decision adversarial-round  # une ronde model-in-the-loop                 (jalon 6)
 ```
 
-État : jalon 1 (squelette). Les commandes existent mais ne font encore rien.
+État : jalons 1 et 2 faits (`datagen`, `verify`, `split`) ; les autres commandes sont vides.
+
+### Données (jalon 2)
+
+```bash
+uv run mini-decision datagen   # data/raw/pairs.jsonl + data/raw/unlabeled.jsonl
+uv run mini-decision verify    # data/processed/labeled.jsonl, rejected.jsonl, judge_spreads.json
+uv run mini-decision split     # data/processed/{train,val,test,test_counterfactual}.jsonl + stats.md
+```
+
+- `datagen --skip-unlabeled` ne génère que les paires.
+- `verify` rejette un contexte si les juges divergent de plus de `judge_max_disagreement`,
+  si l'un d'eux le juge hors sujet alors qu'il ne devait pas l'être (ou l'inverse), s'il
+  est trop long, ou si le label moyen contredit le kind demandé au générateur.
+- `split` lance aussi deux baselines (régression logistique sur n-grammes de caractères) :
+  *descriptions seules* (contrôle de fuite de la spec, doit rester vers 50 %) et *contexte
+  seul* (détecte les artefacts de style, par exemple « la négation indique toujours le faux »).
+- Toutes les statistiques et 10 exemples par kind sont dans `data/processed/stats.md`.
+- Les commandes sont relançables : les appels déjà faits viennent du cache.
 
 ## Structure
 

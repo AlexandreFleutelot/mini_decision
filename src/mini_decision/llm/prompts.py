@@ -19,7 +19,8 @@ Puis écris {n_contexts} contextes courts (une à trois phrases, moins de 100 mo
 - {n_false} de kind "false" (le contexte établit desc_false) ;
 - {n_counterfactual} de kind "counterfactual" : édition minimale d'un contexte "true" qui
   inverse la réponse ; indique dans source_index l'index (0-based) du contexte édité ;
-- {n_off_topic} de kind "off_topic" : du même domaine mais sans rapport avec les deux descriptions.
+- {n_off_topic} de kind "off_topic" : un texte administratif plausible (même sous-domaine ou
+  un autre) qui ne permet de trancher ni pour l'une ni pour l'autre description.
 
 Exigences :
 - insiste sur la négation, la double négation, la portée de la négation, les quantificateurs
@@ -27,6 +28,7 @@ Exigences :
 - varie longueur et style : les contextes vrais ne doivent pas être systématiquement plus
   longs ni plus formels que les faux ;
 - les contextes ne doivent jamais recopier mot pour mot une description.
+- mélange les formats : e-mail, SMS, note interne, extrait de compte rendu, message client.
 
 Ne réutilise aucune de ces propositions déjà générées : {avoid}
 """
@@ -53,7 +55,7 @@ Domaine : {domain} — sous-domaine : {subdomain}
 
 Écris {n} textes courts et variés (une à trois phrases) du domaine, en {language} :
 messages, notes, extraits d'e-mails, comptes rendus. Inclus des négations, des quantités,
-des dates et des montants. Ne réutilise pas ces thèmes : {avoid}
+des dates et des montants. Lot n°{batch} : varie les situations, interlocuteurs et tons.
 """
 
 ADVERSARIAL = """\

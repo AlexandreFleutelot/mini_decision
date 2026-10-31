@@ -44,6 +44,8 @@ class DataConfig(_Strict):
     kind_ratios: dict[Literal["true", "false", "off_topic"], float]
     counterfactual_share_of_false: float = Field(ge=0, le=1)
     max_context_tokens: int
+    tokens_per_word_estimate: float  # filtre de longueur avant d'avoir le tokenizer
+    unlabeled_texts_per_call: int
     judge_max_disagreement: float
     off_topic_label: float
     unlabeled_ratio: float

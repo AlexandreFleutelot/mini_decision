@@ -16,10 +16,11 @@ COMMANDS = [
     "adversarial-round",
     "report",
 ]
+NOT_YET_IMPLEMENTED = COMMANDS[3:]
 
 
-@pytest.mark.parametrize("command", COMMANDS)
-def test_command_runs(command: str) -> None:
+@pytest.mark.parametrize("command", NOT_YET_IMPLEMENTED)
+def test_stub_command_runs(command: str) -> None:
     config = ROOT / "configs" / "debug.yaml"
     result = CliRunner().invoke(app, [command, "--config", str(config), "--set", "seed=1"])
     assert result.exit_code == 0, result.output

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from mini_decision.config import LLMModelConfig
 from mini_decision.llm.base import BudgetExceeded, LLMClient, LLMError
-from mini_decision.llm.cache import CachedLLMClient, SpendTracker
+from mini_decision.llm.cache import CachedLLMClient, SpendTracker, spend_summary
 
 
 def make_client(
@@ -28,4 +28,5 @@ __all__ = [
     "LLMError",
     "SpendTracker",
     "make_client",
+    "spend_summary",
 ]

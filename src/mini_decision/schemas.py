@@ -79,6 +79,29 @@ class AdversarialBatch(BaseModel):
     contexts: list[GeneratedContext]
 
 
+# --- Fichiers intermédiaires ------------------------------------------------------------------
+
+
+class RawPair(BaseModel):
+    """Sortie de `datagen` (data/raw/pairs.jsonl), avant jugement."""
+
+    pair_id: str
+    subdomain: str
+    desc_true: str
+    desc_false: str
+    contexts: list[GeneratedContext]
+
+
+class Rejected(BaseModel):
+    """Exemple écarté par `verify`, avec la raison et l'avis des juges."""
+
+    pair_id: str
+    context: str
+    kind: Kind
+    reason: str
+    judgments: list[Judgment]
+
+
 # --- E/S JSONL ------------------------------------------------------------------------------
 
 

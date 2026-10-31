@@ -32,18 +32,20 @@ data:
     off_topic: 0.2
   counterfactual_share_of_false: 0.5
   max_context_tokens: 128
+  tokens_per_word_estimate: 1.6
   judge_max_disagreement: 0.3
   off_topic_label: 0.5
   unlabeled_ratio: 3.0          # volume non étiqueté / volume de contextes étiquetés (2 à 5)
+  unlabeled_texts_per_call: 40
   split: {train: 0.8, val: 0.1, test: 0.1}
   leakage_max_accuracy: 0.6     # au-delà : fuite signalée
 
 llm:
   # Prix en $ par million de tokens (entrée / sortie), utilisés pour le plafond de dépense.
   generator: {provider: anthropic, model: claude-haiku-5-5, max_tokens: 16000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}
-  judges:                       # deux juges différents ; la moyenne donne le label souple
+  judges:                       # deux tirages Haiku (variante Gemma local : judges_gemma.yaml)
     - {provider: anthropic, model: claude-haiku-5-5, max_tokens: 4000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}
-    - {provider: ollama, model: "gemma4:e4b", max_tokens: 1000, host: "http://localhost:11434"}  # tag exact : `ollama list`
+    - {provider: anthropic, model: claude-haiku-5-5, max_tokens: 4000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}  # second tirage
   budget_usd: 10.0              # cumulé sur tous les runs ; au-delà, les appels payants sont refusés
   max_concurrency: 8
 
