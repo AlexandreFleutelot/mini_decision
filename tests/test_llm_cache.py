@@ -112,3 +112,33 @@ def test_ollama_retries_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client._client, "chat", lambda **kw: reply("pas du json"))
     with pytest.raises(LLMError):
         client.complete_json("p", Judgment)
+
+
+def test_ollama_falls_back_when_structured_output_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    import ollama
+
+    from mini_decision.llm.providers import OllamaClient
+
+    formats: list = []
+
+    def fake_chat(**kwargs):  # noqa: ANN003, ANN202
+        formats.append(kwargs["format"])
+        if isinstance(kwargs["format"], dict):
+            raise ollama.ResponseError("structured output is unavailable", 501)
+        assert "schéma" in kwargs["messages"][-1]["content"]  # schéma décrit dans le prompt
+        return SimpleNamespace(
+            message=SimpleNamespace(content='```json\n{"off_topic": true, "p_true": 0.5}\n```'),
+            prompt_eval_count=1,
+            eval_count=1,
+        )
+
+    client = OllamaClient("gemma4:e4b")
+    monkeypatch.setattr(client._client, "chat", fake_chat)
+    assert client.complete_json("p", Judgment).off_topic is True
+    assert client.complete_json("q", Judgment).off_topic is True
+    assert formats[0] != "json" and formats[1:] == ["json", "json"]  # bascule mémorisée
+    assert client.mode == "json"
