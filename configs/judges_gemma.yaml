@@ -1,0 +1,7 @@
+# Second juge = Gemma servi par Ollama en local (gratuit mais ~5 s par contexte).
+# Usage : uv run mini-decision verify -c configs/judges_gemma.yaml
+inherit: base.yaml
+llm:
+  judges:
+    - {provider: anthropic, model: claude-haiku-5-5, max_tokens: 4000, usd_per_m_in: 0.10, usd_per_m_out: 0.50}
+    - {provider: ollama, model: "gemma4:e4b", max_tokens: 2000, host: "http://localhost:11434"}
